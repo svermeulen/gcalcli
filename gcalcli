@@ -539,6 +539,7 @@ class gcalcli:
                  detailLocation=False,
                  detailAttendees=False,
                  detailLength=False,
+                 detailUid=False,
                  detailReminders=False,
                  detailDescr=False,
                  detailDescrWidth=80,
@@ -571,6 +572,7 @@ class gcalcli:
         self.detailCalendar = detailCalendar
         self.detailLocation = detailLocation
         self.detailLength = detailLength
+        self.detailUid = detailUid
         self.detailReminders = detailReminders
         self.detailDescr = detailDescr
         self.detailDescrWidth = detailDescrWidth
@@ -1254,6 +1256,10 @@ class gcalcli:
             xstr = "%s  Length: %s\n" % (detailsIndent, diffDateTime)
             PrintMsg(CLR_NRM(), xstr)
 
+        if self.detailUid and 'iCalUID' in event:
+            xstr = "%s  UID: %s\n" % (detailsIndent, event['iCalUID'])
+            PrintMsg(CLR_NRM(), xstr)
+
         if self.detailReminders and 'reminders' in event:
             if event['reminders']['useDefault'] is True:
                 xstr = "%s  Reminder: (default)\n" % (detailsIndent)
@@ -1548,17 +1554,25 @@ class gcalcli:
 
         return eventList
 
-    def _SearchForCalEvents(self, start, end, searchText):
+    def _SearchForCalEvents(self, start, end, searchText, event, ignoreEventTime):
 
         eventList = []
 
         for cal in self.cals:
-            events = self._CalService().events().\
-                list(calendarId=cal['id'],
-                     timeMin=start.isoformat() if start else None,
-                     timeMax=end.isoformat() if end else None,
-                     q=searchText if searchText else None,
-                     singleEvents=True).execute()
+            if not event:
+                events = self._CalService().events().\
+                    list(calendarId=cal['id'],
+                         timeMin=start.isoformat() if start else None,
+                         timeMax=end.isoformat() if end else None,
+                         q=searchText if searchText else None,
+                         singleEvents=True).execute()
+            else:
+                events = self._CalService().events().\
+                    list(calendarId=cal['id'],
+                         timeMin=event['start']['dateTime'] if not ignoreEventTime else None,
+                         timeMax=event['end']['dateTime'] if not ignoreEventTime else None,
+                         iCalUID=event['iCalUID'] if event['iCalUID'] else None,
+                         singleEvents=True).execute()
             eventList.extend(self._GetAllEvents(cal, events, end))
 
         eventList.sort(lambda x, y: cmp(x['s'], y['s']))
@@ -1599,7 +1613,8 @@ class gcalcli:
         #       Don't forget to clean up AgendaQuery too!
 
         start = self.now if self.ignoreStarted else None
-        eventList = self._SearchForCalEvents(start, None, searchText)
+        eventList = self._SearchForCalEvents(start, None, searchText,
+                                             None, False)
 
         self._IterateEvents(self.now, eventList, yearDate=True)
 
@@ -1633,7 +1648,7 @@ class gcalcli:
                 PrintErrMsg('Error: failed to parse end time\n')
                 return
 
-        eventList = self._SearchForCalEvents(start, end, None)
+        eventList = self._SearchForCalEvents(start, end, None, None, False)
 
         if self.tsv:
             self._tsv(start, eventList)
@@ -1685,7 +1700,7 @@ class gcalcli:
             if totalDays % 7:
                 count += 1
 
-        eventList = self._SearchForCalEvents(start, end, None)
+        eventList = self._SearchForCalEvents(start, end, None, None, False)
 
         self._GraphEvents(cmd, start, count, eventList)
 
@@ -1766,7 +1781,8 @@ class gcalcli:
         if searchText == '':
             return
 
-        eventList = self._SearchForCalEvents(None, None, searchText)
+        eventList = self._SearchForCalEvents(None, None, searchText,
+                                             None, False)
 
         self.iamaExpert = expert
         self._IterateEvents(self.now, eventList,
@@ -1778,7 +1794,8 @@ class gcalcli:
         if searchText == '':
             return
 
-        eventList = self._SearchForCalEvents(None, None, searchText)
+        eventList = self._SearchForCalEvents(None, None, searchText,
+                                             None, False)
 
         self._IterateEvents(self.now, eventList,
                             yearDate=True, work=self._EditEvent)
@@ -1795,7 +1812,7 @@ class gcalcli:
         start = self.now
         end = (start + timedelta(minutes=(minutes + 5)))
 
-        eventList = self._SearchForCalEvents(start, end, None)
+        eventList = self._SearchForCalEvents(start, end, None, None, False)
 
         message = ''
 
@@ -1842,20 +1859,34 @@ class gcalcli:
             event = {}
 
             if verbose:
-                print "+----------------+"
-                print "| Calendar Event |"
-                print "+----------------+"
+                PrintMsg(CLR_NRM(), "+----------------+\n")
+                PrintMsg(CLR_NRM(), "| Calendar Event |\n")
+                PrintMsg(CLR_NRM(), "+----------------+\n")
+
+            if hasattr(ve, 'status'):
+                DebugPrint("STATUS: %s\n" % ve.status.value)
+                if verbose:
+                    PrintMsg(CLR_NRM(), "Status.......%s\n" % ve.status.value)
+                event['status'] = ve.status.value.lower()
+
+            if hasattr(ve, 'uid'):
+                DebugPrint("UID: %s\n" % ve.uid.value)
+                if verbose:
+                    PrintMsg(CLR_NRM(), "UID..........%s\n" % ve.uid.value)
+                event['iCalUID'] = ve.uid.value
 
             if hasattr(ve, 'summary'):
                 DebugPrint("SUMMARY: %s\n" % ve.summary.value)
                 if verbose:
-                    print "Event........%s" % ve.summary.value
+                    PrintMsg(CLR_NRM(), "Event........%s\n" %
+                             ve.summary.value)
                 event['summary'] = ve.summary.value
 
             if hasattr(ve, 'location'):
                 DebugPrint("LOCATION: %s\n" % ve.location.value)
                 if verbose:
-                    print "Location.....%s" % ve.location.value
+                    PrintMsg(CLR_NRM(), "Location.....%s\n" %
+                             ve.location.value)
                 event['location'] = ve.location.value
 
             if not hasattr(ve, 'dtstart') or not hasattr(ve, 'dtend'):
@@ -1869,23 +1900,23 @@ class gcalcli:
                 DebugPrint("DTEND: %s\n" % ve.dtend.value.isoformat())
             if verbose:
                 if ve.dtstart.value:
-                    print "Start........%s" % \
-                        ve.dtstart.value.isoformat()
+                    PrintMsg(CLR_NRM(), "Start........%s\n" %
+                             ve.dtstart.value.isoformat(' '))
                 if ve.dtend.value:
-                    print "End..........%s" % \
-                        ve.dtend.value.isoformat()
+                    PrintMsg(CLR_NRM(), "End..........%s\n" %
+                             ve.dtend.value.isoformat(' '))
                 if ve.dtstart.value:
-                    print "Local Start..%s" % \
-                        self._LocalizeDateTime(ve.dtstart.value)
+                    PrintMsg(CLR_NRM(), "Local Start..%s\n" %
+                             self._LocalizeDateTime(ve.dtstart.value))
                 if ve.dtend.value:
-                    print "Local End....%s" % \
-                        self._LocalizeDateTime(ve.dtend.value)
+                    PrintMsg(CLR_NRM(), "Local End....%s\n" %
+                             self._LocalizeDateTime(ve.dtend.value))
 
             if hasattr(ve, 'rrule'):
 
                 DebugPrint("RRULE: %s\n" % ve.rrule.value)
                 if verbose:
-                    print "Recurrence...%s" % ve.rrule.value
+                    PrintMsg(CLR_NRM(), "Recurrence...%s\n" % ve.rrule.value)
 
                 event['recurrence'] = ["RRULE:" + ve.rrule.value]
 
@@ -1937,7 +1968,7 @@ class gcalcli:
                 descr = ve.description.value.strip()
                 DebugPrint("DESCRIPTION: %s\n" % descr)
                 if verbose:
-                    print "Description:\n%s" % descr
+                    PrintMsg(CLR_NRM(), "Description:\n%s\n" % descr)
                 event['description'] = descr
 
             if hasattr(ve, 'organizer'):
@@ -1948,25 +1979,36 @@ class gcalcli:
                 else:
                     email = ve.organizer.value
                 if verbose:
-                    print "organizer:\n %s" % email
+                    PrintMsg(CLR_NRM(), "organizer:\n %s\n" % email)
                 event['organizer'] = {'displayName': ve.organizer.name,
                                       'email': email}
 
             if hasattr(ve, 'attendee_list'):
                 DebugPrint("ATTENDEE_LIST : %s\n" % ve.attendee_list)
                 if verbose:
-                    print "attendees:"
+                    PrintMsg(CLR_NRM(), "attendees:\n")
                 event['attendees'] = []
+
+                # XXX Need a new option that specifies to put attendees
+                # in the description
+                if not 'description' in event:
+                    event['description'] = ''
+                event['description'] = event['description'] + "\n\nATTENDEES:\n"
+
                 for attendee in ve.attendee_list:
                     if attendee.value.upper().startswith("MAILTO:"):
                         email = attendee.value[7:]
                     else:
                         email = attendee.value
                     if verbose:
-                        print " %s" % email
+                        PrintMsg(CLR_NRM(), " %s\n" % email)
 
-                    event['attendees'].append({'displayName': attendee.name,
-                                               'email': email})
+                    #event['attendees'].append({'displayName': attendee.name,
+                    #                           'email': email})
+
+                    event['description'] = event['description'] + \
+                                           attendee.name + " " + \
+                                           email + "\n"
 
             return event
 
@@ -2010,23 +2052,91 @@ class gcalcli:
                     continue
 
                 if not verbose:
-                    newEvent = self._CalService().events().\
-                        insert(calendarId=self.cals[0]['id'],
-                               body=event).execute()
-                    hLink = self._ShortenURL(newEvent['htmlLink'])
-                    PrintMsg(CLR_GRN(), 'New event added: %s\n' % hLink)
+                    if 'status' in event and event['status'] == 'cancelled':
+                        eventList = self._SearchForCalEvents(None, None, None, event, False)
+                        if len(eventList) == 1:
+                            # Simple case, deleting a single event (from recurrence or not)
+                            self._CalService().events().\
+                                 delete(calendarId = self.cals[0]['id'],
+                                        eventId = eventList[0]['id']).execute()
+                            PrintMsg(CLR_GRN(), 'Event cancelled!\n')
+                        elif len(eventList) == 0:
+                            # No events found, check if a recurrence matches and query to delete all
+                            eventList = self._SearchForCalEvents(None, None, None, event, True)
+                            if len(eventList) > 0 and 'recurrence' in event:
+                                PrintMsg(CLR_MAG(), '%d recurrences to delete for the event\n' % len(eventList))
+                                PrintMsg(CLR_MAG(), 'THIS IS BROKEN!!!\n')
+                                #PrintMsg(CLR_MAG(), '[S]kip or [D]elete all: ')
+                                #val = raw_input()
+                                #if not val or val.lower() == 's':
+                                #    continue
+                                ## delete all the events of the recurrence
+                                #for e in eventList:
+                                #    self._CalService().events().\
+                                #         delete(calendarId = self.cals[0]['id'],
+                                #                eventId = e['id']).execute()
+                            elif len(eventList) > 0:
+                                PrintErrMsg('Error: more than one event exists to cancel: %d\n' % len(eventList))
+                            else:
+                                # Nothing matched so nothing to do!
+                                PrintMsg(CLR_GRN(), 'No events match to delete\n')
+                        else:
+                            # XXX Don't think it is possible to reach here...
+                            PrintErrMsg('Error: more than one event exists to cancel: %d\n' % len(eventList))
+                    else:
+                        eventList = self._SearchForCalEvents(None, None, None, event, True)
+                        if len(eventList) == 0:
+                            newEvent = self._CalService().events().\
+                                    insert(calendarId = self.cals[0]['id'],
+                                           body = event).execute()
+                            hLink = self._ShortenURL(newEvent['htmlLink'])
+                            PrintMsg(CLR_GRN(), 'Event updated: %s\n' % hLink)
+                        elif len(eventList) == 1:
+                            newEvent = self._CalService().events().\
+                                    update(calendarId = self.cals[0]['id'],
+                                           eventId = eventList[0]['id'],
+                                           body = event).execute()
+                            hLink = self._ShortenURL(newEvent['htmlLink'])
+                            PrintMsg(CLR_GRN(), 'New event added: %s\n' % hLink)
+                        else:
+                            PrintErrMsg('Error: more than one event exists to update: %d\n' % len(eventList))
+                            PrintErrMsg('Need to support the RECURRENCE-ID property for moving events...\n')
                     continue
 
+                #dprint(event)
                 PrintMsg(CLR_MAG(), "\n[S]kip [i]mport [q]uit: ")
                 val = raw_input()
                 if not val or val.lower() == 's':
                     continue
                 if val.lower() == 'i':
-                    newEvent = self._CalService().events().\
-                        insert(calendarId=self.cals[0]['id'],
-                               body=event).execute()
-                    hLink = self._ShortenURL(newEvent['htmlLink'])
-                    PrintMsg(CLR_GRN(), 'New event added: %s\n' % hLink)
+                    if 'status' in event and event['status'] == 'cancelled':
+                        eventList = self._SearchForCalEvents(None, None, None, event, False)
+                        if len(eventList) == 1:
+                            # Simple case, deleting a single event (from recurrence or not)
+                            self._CalService().events().\
+                                 delete(calendarId = self.cals[0]['id'],
+                                        eventId = eventList[0]['id']).execute()
+                            PrintMsg(CLR_GRN(), 'Event cancelled!\n')
+                        else:
+                            PrintErrMsg('Error: more than one event exists: %d\n' % len(eventList))
+                    else:
+                        eventList = self._SearchForCalEvents(None, None, None, event, True)
+                        if len(eventList) == 0:
+                            newEvent = self._CalService().events().\
+                                    insert(calendarId = self.cals[0]['id'],
+                                           body = event).execute()
+                            hLink = self._ShortenURL(newEvent['htmlLink'])
+                            PrintMsg(CLR_GRN(), 'Event updated: %s\n' % hLink)
+                        elif len(eventList) == 1:
+                            newEvent = self._CalService().events().\
+                                    update(calendarId = self.cals[0]['id'],
+                                           eventId = eventList[0]['id'],
+                                           body = event).execute()
+                            hLink = self._ShortenURL(newEvent['htmlLink'])
+                            PrintMsg(CLR_GRN(), 'New event added: %s\n' % hLink)
+                        else:
+                            PrintErrMsg('Error: more than one event exists to update: %d\n' % len(eventList))
+                            PrintErrMsg('Need to support the RECURRENCE-ID property for moving events...\n')
                 elif val.lower() == 'q':
                     sys.exit(0)
                 else:
@@ -2100,7 +2210,7 @@ gflags.DEFINE_bool("military", False, "Use 24 hour display")
 
 # Single --detail that allows you to specify what parts you want
 gflags.DEFINE_multistring("details", [], "Which parts to display, can be: "
-                          "'all', 'calendar', 'location', 'length', "
+                          "'all', 'calendar', 'location', 'length', 'uid', "
                           "'reminders', 'description', 'longurl', 'shorturl', "
                           "'url', 'attendees'")
 # old style flags for backwards compatibility
@@ -2109,6 +2219,7 @@ gflags.DEFINE_bool("detail_calendar", False, "Display calendar name")
 gflags.DEFINE_bool("detail_location", False, "Display event location")
 gflags.DEFINE_bool("detail_attendees", False, "Display event attendees")
 gflags.DEFINE_bool("detail_length", False, "Display length of event")
+gflags.DEFINE_bool("detail_uid", False, "Display event iCalUID")
 gflags.DEFINE_bool("detail_reminders", False, "Display reminders")
 gflags.DEFINE_bool("detail_description", False, "Display description")
 gflags.DEFINE_integer("detail_description_width", 80, "Set description width")
@@ -2170,7 +2281,7 @@ gflags.DEFINE_bool("use_reminders", False, "Honour the remind time when running 
 
 gflags.RegisterValidator("details",
                          lambda value: all(x in ["all", "calendar",
-                                                 "location", "length",
+                                                 "location", "length", "uid",
                                                  "reminders", "description",
                                                  "longurl", "shorturl", "url",
                                                  "attendees"]
@@ -2292,6 +2403,8 @@ def BowChickaWowWow():
             FLAGS['detail_location'].value = True
         if not FLAGS['detail_length'].present:
             FLAGS['detail_length'].value = True
+        if not FLAGS['detail_uid'].present:
+            FLAGS['detail_uid'].value = True
         if not FLAGS['detail_reminders'].present:
             FLAGS['detail_reminders'].value = True
         if not FLAGS['detail_description'].present:
@@ -2309,6 +2422,8 @@ def BowChickaWowWow():
             FLAGS['detail_attendees'].value = True
         if 'length' in FLAGS.details:
             FLAGS['detail_length'].value = True
+        if 'uid' in FLAGS.details:
+            FLAGS['detail_uid'].value = True
         if 'reminders' in FLAGS.details:
             FLAGS['detail_reminders'].value = True
         if 'description' in FLAGS.details:
@@ -2327,6 +2442,7 @@ def BowChickaWowWow():
                    detailLocation=FLAGS.detail_location,
                    detailAttendees=FLAGS.detail_attendees,
                    detailLength=FLAGS.detail_length,
+                   detailUid=FLAGS.detail_uid,
                    detailReminders=FLAGS.detail_reminders,
                    detailDescr=FLAGS.detail_description,
                    detailDescrWidth=FLAGS.detail_description_width,
